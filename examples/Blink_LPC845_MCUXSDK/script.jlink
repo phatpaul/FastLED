@@ -1,0 +1,5 @@
+ExitOnError 1
+r
+loadfile /home/paul/repos/FastLED/examples/Blink_LPC845_MCUXSDK/debug/lpc845breakout_hello_world.bin 0x0
+r
+qc

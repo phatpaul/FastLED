@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"name": "lpc845breakout_hello_world",
+			"path": "."
+		},
+		{
+			"path": "../.."
+		}
+	],
+	"settings": {
+		"C_Cpp.codeAnalysis.exclude": {
+			"**/__repo__/**": true
+		},
+		"mcuxpresso.debug.variableUseNaturalFormat": false
+	}
+}

@@ -1,0 +1,17 @@
+{
+  "projects": [{
+    "core": "core0",
+    "addComponents": [],
+    "device_package": "LPC845M301JBD48",
+    "addIncludes": [],
+    "projectBoardFolder": "/home/paul/repos/lcp845-fastled-sdk/projects/blinky/lpc845breakout_hello_world/lpc845breakout",
+    "source_generated_cmake_file_path": "/home/paul/repos/lcp845-fastled-sdk/projects/blinky/lpc845breakout_hello_world/lpc845breakout/cfg_tools_generated.cmake",
+    "addFiles": [],
+    "name": "lpc845breakout_hello_world",
+    "removeFiles": [],
+    "projectRootPath": "/home/paul/repos/lcp845-fastled-sdk/projects/blinky/lpc845breakout_hello_world",
+    "component_edit_prj_file_path": "/home/paul/repos/lcp845-fastled-sdk/projects/blinky/lpc845breakout_hello_world/prj.conf",
+    "board": "lpc845breakout"
+  }],
+  "$schema": "https://mcuxpresso.nxp.com/staticdata/mcux/schema/cfg_require/cfg_require_schema_1.0.json"
+}
