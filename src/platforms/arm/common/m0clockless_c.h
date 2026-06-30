@@ -34,39 +34,7 @@
 #include "fl/chipsets/timing_traits.h"
 #include "fl/stl/noexcept.h"
 #include "platforms/arm/is_arm.h"  // FL_IS_ARM_M0_PLUS (loop-delay period selection)
-
-// CMSIS interrupt-control intrinsics used by `showLedData`. These live as
-// `__STATIC_INLINE` functions in `cmsis_gcc.h` per Cortex-M CMSIS bundle.
-// gcc 15.2+ `-Wtemplate-body` errors on the function-template instantiation
-// when `__get_PRIMASK` is an undeclared name at template-body parse time,
-// so provide static-inline fallbacks here that match the canonical CMSIS
-// semantics (inline asm against the PRIMASK SCS register). Guarded with
-// `#ifndef` so a transitively-included `cmsis_gcc.h` wins -- on platforms
-// where CMSIS is on the include path (LPC8xx, SAMD, nRF, STM32) the local
-// definitions below are skipped. On Arduino-AVR where `__enable_irq` is a
-// preprocessor macro from `WString.h`, the macro guard also wins.
-// Skip entirely when a CMSIS device header is on the include path (it declares
-// these as functions, which the #ifndef guards below cannot detect, so defining
-// them here would clash). LPC builds set FASTLED_HAS_CMSIS in led_sysdefs.
-#if !defined(FASTLED_HAS_CMSIS)
-#ifndef __get_PRIMASK
-static inline fl::u32 __get_PRIMASK(void) FL_NO_EXCEPT {
-    fl::u32 primask;
-    __asm volatile ("MRS %0, primask" : "=r" (primask) :: "memory");
-    return primask;
-}
-#endif
-#ifndef __enable_irq
-static inline void __enable_irq(void) FL_NO_EXCEPT {
-    __asm volatile ("cpsie i" ::: "memory");
-}
-#endif
-#ifndef __disable_irq
-static inline void __disable_irq(void) FL_NO_EXCEPT {
-    __asm volatile ("cpsid i" ::: "memory");
-}
-#endif
-#endif  // !FASTLED_HAS_CMSIS
+#include "fl/math/scale8.h"
 
 FL_EXTERN_C_BEGIN
 
@@ -320,19 +288,6 @@ FL_FORCE_INLINE fl::u8 load_and_prepare_dither(fl::u8 pixel, M0ClocklessData* da
 }
 
 /**
- * apply_scale - Apply color correction scaling
- * Equivalent to: scale4 macro
- *
- * The assembly version stores scale factors as 32-bit fixed-point multipliers.
- * After multiplication, the high 16 bits contain the scaled result.
- */
-FL_FORCE_INLINE fl::u8 apply_scale(fl::u8 pixel, fl::u32 scale_factor) FL_NO_EXCEPT {
-    fl::u32 result = (fl::u32)pixel * scale_factor;
-    // Extract high byte (bits 23:16) as the scaled result
-    return (fl::u8)(result >> 16);
-}
-
-/**
  * adjust_dither - Update dither value for next pixel
  * Equivalent to: adjdither7 macro
  *
@@ -423,23 +378,26 @@ FL_RAMFUNC int showLedData(volatile fl::u32* port, fl::u32 bitmask,
     fl::u32 counter = num_leds;
     fl::u8 b0 = 0, b1 = 0, b2 = 0;  // Bytes for current pixel (positioned for output)
 
-#if (FASTLED_SCALE8_FIXED == 1)
-    ++pData->s[0];
-    ++pData->s[1];
-    ++pData->s[2];
-#endif
 
     /////////////////////////////////////////////////////////////////////////////
     // Helper macro: Process a byte (load, dither, scale)
     /////////////////////////////////////////////////////////////////////////////
-    #define PROCESS_BYTE(channel, bn) do { \
+#if (FL_ARM_M0_NO_DITHER == 1)
+#define PROCESS_BYTE(channel, bn) do { \
+        fl::u8 pixel = load_led_byte(leds, M0_RO(channel)); \
+        pixel = fl::scale8(pixel, pData->s[M0_RO(channel)]); \
+        bn = prepare_byte_for_output(pixel); \
+    } while(0)
+#else
+#define PROCESS_BYTE(channel, bn) do { \
         fl::u8 pixel = load_led_byte(leds, M0_RO(channel)); \
         fl::u8 dither = load_and_prepare_dither(pixel, pData, M0_RO(channel)); \
         pixel = qadd8(pixel, dither); \
-        pixel = apply_scale(pixel, pData->s[M0_RO(channel)]); \
+        pixel = fl::scale8(pixel, pData->s[M0_RO(channel)]); \
         adjust_dither(pData, M0_RO(channel)); \
         bn = prepare_byte_for_output(pixel); \
     } while(0)
+#endif
 
     /////////////////////////////////////////////////////////////////////////////
     // Helper macro: Output one bit of a byte
@@ -464,16 +422,16 @@ FL_RAMFUNC int showLedData(volatile fl::u32* port, fl::u32 bitmask,
         FL_COMPILER_BARRIER(); \
         gpio_set_high(port, bitmask, HI_OFFSET); \
         FL_COMPILER_BARRIER(); \
-        fl_delay_cycles_ct<(int)T1_CYCLES - 1>(); \
+        fl_delay_cycles_ct<(int)T1_CYCLES - 5>(); \
         FL_COMPILER_BARRIER(); \
         byte = gpio_conditional_low(byte, port, bitmask, LO_OFFSET); \
         FL_COMPILER_BARRIER(); \
         work_code; \
-        fl_delay_cycles_ct<(int)T2_CYCLES - 3 - (int)(work_cycles)>(); \
+        fl_delay_cycles_ct<(int)T2_CYCLES - 5 - (int)(work_cycles)>(); \
         FL_COMPILER_BARRIER(); \
         gpio_set_low(port, bitmask, LO_OFFSET); \
         FL_COMPILER_BARRIER(); \
-        fl_delay_cycles_ct<(int)T3_CYCLES - 1>(); \
+        fl_delay_cycles_ct<(int)T3_CYCLES - 5>(); \
         FL_COMPILER_BARRIER(); \
     } while(0)
 
