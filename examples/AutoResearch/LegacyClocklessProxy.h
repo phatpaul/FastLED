@@ -21,6 +21,29 @@ enum class LegacyClocklessChipset : uint8_t {
 #define AUTORESEARCH_LEGACY_SUPPORTS_PIN_22 0
 #endif
 
+// GPIO6/7/8 on the classic ESP32 (esp32dev / WROOM modules) are
+// reserved for SPI flash (SD2/SD3/CMD/CLK/SD0/SD1 — pins 6-11) and
+// FastLED's `FASTLED_UNUSABLE_PIN_MASK` for esp32dev marks pins
+// {6, 7, 8, 9, 10, 11, 20} as `validpin() == false`. Instantiating any
+// clockless driver bound to those pins fails the FastLED static_assert
+// at compile time. Other ESP32 variants (S2/S3/C-series, P4) repurpose
+// GPIO6-8 and accept them as valid output pins, and every non-ESP
+// family treats them as normal digital pins. The classic-ESP32
+// sentinel is `FL_IS_ESP_32DEV` (defined in `src/platforms/esp/is_esp.h`);
+// the prior #3447 attempt used `FL_IS_ESP_32` which is not a real macro,
+// so the gate never fired and esp32dev compile still hit the
+// static_assert. LegacyClocklessProxy iterates pins 0-8 so all three
+// of 6/7/8 must be excluded for the classic ESP32 build.
+#if defined(FL_IS_ESP_32DEV)
+#define AUTORESEARCH_LEGACY_SUPPORTS_PIN_6 0
+#define AUTORESEARCH_LEGACY_SUPPORTS_PIN_7 0
+#define AUTORESEARCH_LEGACY_SUPPORTS_PIN_8 0
+#else
+#define AUTORESEARCH_LEGACY_SUPPORTS_PIN_6 1
+#define AUTORESEARCH_LEGACY_SUPPORTS_PIN_7 1
+#define AUTORESEARCH_LEGACY_SUPPORTS_PIN_8 1
+#endif
+
 inline const char* legacyClocklessChipsetName(LegacyClocklessChipset chipset) {
     switch (chipset) {
         case LegacyClocklessChipset::WS2812B:
@@ -97,9 +120,15 @@ public:
             case 3: mController = create<3>(leds, numLeds, chipset, rgbw); break;
             case 4: mController = create<4>(leds, numLeds, chipset, rgbw); break;
             case 5: mController = create<5>(leds, numLeds, chipset, rgbw); break;
+#if AUTORESEARCH_LEGACY_SUPPORTS_PIN_6
             case 6: mController = create<6>(leds, numLeds, chipset, rgbw); break;
+#endif
+#if AUTORESEARCH_LEGACY_SUPPORTS_PIN_7
             case 7: mController = create<7>(leds, numLeds, chipset, rgbw); break;
+#endif
+#if AUTORESEARCH_LEGACY_SUPPORTS_PIN_8
             case 8: mController = create<8>(leds, numLeds, chipset, rgbw); break;
+#endif
 #if AUTORESEARCH_LEGACY_SUPPORTS_PIN_22
             case 22: mController = create<22>(leds, numLeds, chipset, rgbw); break;
 #endif

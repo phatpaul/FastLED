@@ -1,6 +1,6 @@
 // @filter
 // require:
-//   - board: esp32s3,esp32c6,esp32p4,teensy41,teensy40,lpc845brk,lpcxpresso845max,lpcxpresso804
+//   - board: esp32s3,esp32c6,esp32p4,teensy41,teensy40,lpc845,lpc845brk,lpcxpresso845max,lpcxpresso804
 // @end-filter
 //
 // Low-memory mode (FastLED #3030): on Low-tier targets (LPC8xx etc., per
@@ -542,7 +542,7 @@ void loop() {
 
     // Run GPIO baseline test once after device is ready (allows JSON-RPC to be operational first)
     // This test is informational only - we continue regardless of pass/fail
-    if (!g_autoresearch_state->gpio_baseline_test_done) {
+    if (!g_autoresearch_state->gpio_baseline_test_done && g_autoresearch_state->rx_channel) {
         // Wait 500ms after boot to ensure JSON-RPC is fully operational
         if (millis() > 500) {
             g_autoresearch_state->gpio_baseline_test_done = true;

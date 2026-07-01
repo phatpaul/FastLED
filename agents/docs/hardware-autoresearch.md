@@ -28,7 +28,8 @@ bash autoresearch --spi
 bash autoresearch --uart
 bash autoresearch --i2s                       # ESP32-S3 only
 bash autoresearch --lcd-rgb                   # ESP32-P4 only
-bash autoresearch lpc845brk --ieee754         # LPC low-memory IEEE 754 codec check
+bash autoresearch lpc845 --ieee754            # LPC low-memory IEEE 754 codec check
+                                              # (lpc845brk still works as a deprecated alias — #3220)
 
 # Test multiple drivers (sequentially)
 bash autoresearch --parlio --rmt              # Auto-detect environment
@@ -390,7 +391,7 @@ Adding a pin: append a row mapping its Teensy digital number to its FLEXIO1 inpu
 ### Verification
 
 - **`flexioRxBenchmark`** — diagnostic RPC that drives a square wave via `analogWriteFrequency` and reports per-period mean / sigma / min / max nanoseconds. The raw script is useful for investigation only; acceptance must be routed through canonical `bash autoresearch`.
-- **`flexioObjectFledTest`** — diagnostic RPC that drives a WS2812 pattern via `Bus::OBJECT_FLED` and decodes the captured edge stream against `TIMING_WS2812B_V5`. The raw `ci/autoresearch/test_flexio_rx_objectfled.py` script is not an acceptance path; use it only when deliberately debugging outside a canonical run, and close it before `bash autoresearch`.
+- **`flexioObjectFledTest`** — diagnostic RPC that drives a WS2812 pattern via `Bus::FLEX_IO` slot 0 and decodes the captured edge stream against `TIMING_WS2812B_V5`. The raw `ci/autoresearch/test_flexio_rx_objectfled.py` script is not an acceptance path; use it only when deliberately debugging outside a canonical run, and close it before `bash autoresearch`.
 
 `RxBackend::PLATFORM_DEFAULT` switching from FlexPWM to FlexIO on Teensy 4 is intentionally **deferred** to a follow-up PR — keeps the bench-validation surface small and the existing FlexPWM-based AutoResearch flows untouched until both backends are equally exercised.
 

@@ -43,22 +43,47 @@ CHIP_TO_ENVIRONMENT: dict[str, str] = {
 # ESP32 variants that lack WiFi hardware
 NO_WIFI_ENVIRONMENTS: set[str] = {"esp32h2", "esp32p4"}
 
-# PlatformIO environments → expected USB VID:PID for the data-bearing VCOM
-# port. This bypasses the description-string heuristic for boards whose USB
-# descriptors are too generic to disambiguate (e.g. "USB Serial Device" on
-# Windows for both the LPC845-BRK VCOM and any other Microsoft CDC device).
+# PlatformIO environments → expected USB VID:PID(s) for the data-bearing
+# VCOM port. This bypasses the description-string heuristic for boards
+# whose USB descriptors are too generic to disambiguate (e.g. "USB Serial
+# Device" on Windows for both the LPC845-BRK VCOM and any other Microsoft
+# CDC device).
+#
+# Each entry is a **tuple of accepted VID:PID pairs** — the first port
+# whose (vid, pid) matches any pair is selected. Some boards ship one of
+# several debug-probe firmwares that expose different VID:PIDs; listing
+# them all here lets the same PlatformIO env work regardless of which
+# firmware is on the on-board probe (see the LPC845-BRK note below).
+#
 # Add new entries here when porting to a new board. See FastLED #3300 for
-# the LPC845-BRK case that motivated this map. ci/util/serial_probe.py has
-# a richer fingerprint table; this map only carries the entries autoresearch
-# needs for default-port selection.
+# the LPC845-BRK case that motivated this map. ci/util/serial_probe.py
+# has a richer fingerprint table; this map only carries the entries
+# autoresearch needs for default-port selection.
+ENVIRONMENT_TO_VCOM_VID_PIDS: dict[str, tuple[tuple[int, int], ...]] = {
+    # LPC8xx family: the on-board debug probe can be either
+    #   * LPC11U35 running the LPCXpresso VCOM firmware — 16C0:0483
+    #     (the community "V-USB" VID:PID; shared with PJRC Teensy).
+    #   * LPC-Link2 CMSIS-DAP firmware — 1FC9:0132
+    #     (NXP's own VID:PID; the debug probe presents a single COM
+    #     port that carries the LPC845's USART0 as a virtual serial
+    #     bridge alongside the CMSIS-DAP HID interface).
+    # Newer LPC845-BRK / LPCXpresso boards ship with the LPC-Link2
+    # CMSIS-DAP firmware pre-flashed; either variant is acceptable for
+    # AutoResearch as long as the VCOM stream reaches the host.
+    "lpc845brk": ((0x16C0, 0x0483), (0x1FC9, 0x0132)),
+    "lpc845": ((0x16C0, 0x0483), (0x1FC9, 0x0132)),
+    "lpc804": ((0x16C0, 0x0483), (0x1FC9, 0x0132)),
+    "lpcxpresso845max": ((0x16C0, 0x0483), (0x1FC9, 0x0132)),
+    "lpcxpresso804": ((0x16C0, 0x0483), (0x1FC9, 0x0132)),
+}
+
+# Backwards-compatibility shim — the old single-VID:PID map is derived
+# from the first entry of the new plural form so any external caller
+# that still reads `ENVIRONMENT_TO_VCOM_VID_PID` gets the primary
+# (LPCXpresso VCOM) fingerprint. Deprecated; update callers to consume
+# the plural form and drop this once no in-repo callers remain.
 ENVIRONMENT_TO_VCOM_VID_PID: dict[str, tuple[int, int]] = {
-    # LPC8xx family: LPC11U35-on-board USB-VCOM bridge for USART0.
-    # Same VID:PID across all four LPC8xx canary boards.
-    "lpc845brk": (0x16C0, 0x0483),
-    "lpc845": (0x16C0, 0x0483),
-    "lpc804": (0x16C0, 0x0483),
-    "lpcxpresso845max": (0x16C0, 0x0483),
-    "lpcxpresso804": (0x16C0, 0x0483),
+    env: pids[0] for env, pids in ENVIRONMENT_TO_VCOM_VID_PIDS.items()
 }
 
 
@@ -151,14 +176,19 @@ def auto_detect_upload_port(expected_environment: str | None) -> ComportResult:
 
     # VID:PID-based detection takes precedence over chip-probe and description
     # heuristics. For boards whose VCOM bridges have well-known IDs (LPC845-BRK
-    # via LPC11U35, see FastLED #3300), this is the only reliable signal on
-    # Windows where multiple boards report a generic "USB Serial Device" name.
-    expected_vid_pid = (
-        ENVIRONMENT_TO_VCOM_VID_PID.get(expected_env) if expected_env else None
+    # via LPC11U35 or LPC-Link2 CMSIS-DAP, see FastLED #3300), this is the only
+    # reliable signal on Windows where multiple boards report a generic "USB
+    # Serial Device" name. An environment may map to more than one accepted
+    # VID:PID (e.g. LPC845-BRK boards ship with either LPCXpresso VCOM
+    # firmware 16C0:0483 or LPC-Link2 CMSIS-DAP firmware 1FC9:0132 on the
+    # debug probe) — the first port matching ANY of the entry's pairs wins.
+    expected_vid_pids = (
+        ENVIRONMENT_TO_VCOM_VID_PIDS.get(expected_env) if expected_env else None
     )
-    if expected_vid_pid is not None:
+    if expected_vid_pids:
+        accepted = set(expected_vid_pids)
         for port in usb_ports:
-            if (port.vid, port.pid) == expected_vid_pid:
+            if (port.vid, port.pid) in accepted:
                 return ComportResult(
                     ok=True,
                     selected_port=port.device,
@@ -168,13 +198,15 @@ def auto_detect_upload_port(expected_environment: str | None) -> ComportResult:
         # Fingerprint expected but no port matched. Don't fall through to the
         # ESP probe — the wrong port will fail later with PermissionError or
         # silent timeout. Report explicitly so the user can plug the board in.
-        vid, pid = expected_vid_pid
+        formatted_expected = " or ".join(
+            f"{vid:04X}:{pid:04X}" for vid, pid in expected_vid_pids
+        )
         return ComportResult(
             ok=False,
             selected_port=None,
             error_message=(
                 f"No USB serial port matched expected VCOM fingerprint for "
-                f"'{expected_environment}' (VID:PID {vid:04X}:{pid:04X}). "
+                f"'{expected_environment}' (VID:PID {formatted_expected}). "
                 f"Detected USB ports: "
                 + ", ".join(
                     f"{p.device}={p.vid:04X}:{p.pid:04X}"
@@ -191,7 +223,10 @@ def auto_detect_upload_port(expected_environment: str | None) -> ComportResult:
         probe_notes: list[str] = []
         saw_positive_detection = False
         for port in usb_ports:
-            chip_result = detect_attached_chip(port.device, timeout=3.0)
+            # FastLED #3446: drop the explicit 3.0 s override so the call
+            # picks up `detect_attached_chip`'s richer 15 s default and the
+            # reset-strategy fallback chain (default → usb → no-reset).
+            chip_result = detect_attached_chip(port.device)
             if chip_result.ok:
                 saw_positive_detection = True
                 detected_env = chip_result.environment or "unknown"
@@ -465,18 +500,15 @@ class ChipDetectionResult:
     error_message: str | None = None
 
 
-def detect_attached_chip(port: str, timeout: float = 10.0) -> ChipDetectionResult:
-    """Detect ESP chip type using esptool.
+def _probe_chip_with_reset_mode(
+    port: str, reset_mode: str, timeout: float
+) -> tuple[str | None, str | None]:
+    """Run esptool chip-id with a specific --before reset strategy.
 
-    Uses esptool with auto chip detection to identify the connected ESP device.
-    This allows automatic selection of the correct PlatformIO environment.
-
-    Args:
-        port: Serial port name (e.g., "COM13", "/dev/ttyUSB0")
-        timeout: Maximum time to wait for esptool in seconds
-
-    Returns:
-        ChipDetectionResult with chip type, suggested environment, or error details
+    Returns ``(chip_type, error)``. Exactly one of the two is non-None on
+    a clean call. The caller is responsible for combining results across
+    multiple strategies and surfacing the final error if every strategy
+    fails.
     """
     try:
         result = subprocess.run(
@@ -490,63 +522,132 @@ def detect_attached_chip(port: str, timeout: float = 10.0) -> ChipDetectionResul
                 "auto",
                 "-p",
                 port,
+                "--before",
+                reset_mode,
                 "chip-id",
             ],
             capture_output=True,
             text=True,
             timeout=timeout,
         )
-
-        # Parse output for "Detecting chip type... ESP32-S3" line
-        chip_type = None
-        for line in result.stdout.split("\n"):
-            if "Detecting chip type..." in line:
-                # Extract chip type after "..."
-                chip_type = line.split("...")[-1].strip()
-                break
-
-        if not chip_type:
-            # Also check for "Chip is ESP32-S3" pattern in case output format varies
-            for line in result.stdout.split("\n"):
-                if line.strip().startswith("Chip is "):
-                    chip_type = line.strip().replace("Chip is ", "").strip()
-                    break
-
-        if not chip_type:
-            return ChipDetectionResult(
-                ok=False,
-                chip_type=None,
-                environment=None,
-                error_message="Could not parse chip type from esptool output",
-            )
-
-        # Map chip type to environment
-        environment = chip_to_environment(chip_type)
-
-        return ChipDetectionResult(
-            ok=True,
-            chip_type=chip_type,
-            environment=environment,
-            error_message=None,
-        )
-
     except subprocess.TimeoutExpired:
-        return ChipDetectionResult(
-            ok=False,
-            chip_type=None,
-            environment=None,
-            error_message=f"esptool timed out after {timeout}s - device may not be in bootloader mode",
+        return (
+            None,
+            f"esptool --before {reset_mode} timed out after {timeout:.1f}s",
         )
     except KeyboardInterrupt as ki:
         handle_keyboard_interrupt(ki)
         raise
     except Exception as e:
+        return None, f"esptool --before {reset_mode} crashed: {e}"
+
+    # Parse output for "Detecting chip type... ESP32-S3" line
+    chip_type: str | None = None
+    for line in result.stdout.split("\n"):
+        if "Detecting chip type..." in line:
+            chip_type = line.split("...")[-1].strip()
+            break
+
+    if not chip_type:
+        # Also check for "Chip is ESP32-S3" pattern in case output format varies
+        for line in result.stdout.split("\n"):
+            if line.strip().startswith("Chip is "):
+                chip_type = line.strip().replace("Chip is ", "").strip()
+                break
+
+    if chip_type:
+        return chip_type, None
+
+    stderr_tail = (result.stderr or "").strip().splitlines()
+    tail_line = stderr_tail[-1] if stderr_tail else ""
+    return (
+        None,
+        f"esptool --before {reset_mode} produced no chip-id; last stderr: {tail_line!r}",
+    )
+
+
+def detect_attached_chip(port: str, timeout: float = 7.0) -> ChipDetectionResult:
+    """Detect ESP chip type using esptool.
+
+    Uses esptool with auto chip detection to identify the connected ESP device.
+    This allows automatic selection of the correct PlatformIO environment.
+
+    FastLED #3446: previously hardcoded at 3.0 s with one reset strategy.
+    That budget undershoots the CP210x worst-case auto-reset path (slow
+    USB driver init + ~4 s of esptool SYNC retries + bootloader
+    handshake), so devkits with even a slightly sluggish reset circuit
+    failed to be recognised on the first try.
+
+    Detection budget per port:
+
+    1. **Primary**: ``--before default-reset`` (the classic DTR/RTS
+       auto-reset). Bounded by ``timeout``. Catches all healthy boards
+       on the first pass.
+    2. **Fallback chain**, ONLY triggered when the primary attempt
+       actually *timed out* (i.e. esptool was still in the
+       reset/sync loop, not "no device on this port" — those fail fast):
+       - ``--before usb-reset`` — native USB-CDC chips
+         (S2/S3/C2/C3/H2/C6) whose reset path is over USB, not DTR/RTS.
+       - ``--before no-reset`` — boards where the user (or a
+         previous flash) already left the device in the bootloader.
+
+       Each fallback gets the same ``timeout``. Skipped on "no chip-id
+       produced" so empty ports don't drag the total probe out — keeps
+       a 5-port-all-empty sweep under ~10 s.
+
+    Args:
+        port: Serial port name (e.g., "COM13", "/dev/ttyUSB0")
+        timeout: Per-strategy wall-clock budget. Default 7 s — covers
+            the CP210x worst case while keeping a multi-port sweep
+            with no devices well under 30 s total.
+
+    Returns:
+        ChipDetectionResult with chip type, suggested environment, or
+        an aggregated error describing what each reset strategy saw.
+    """
+    primary_mode = "default-reset"
+    chip_type, primary_err = _probe_chip_with_reset_mode(port, primary_mode, timeout)
+    if chip_type:
+        return ChipDetectionResult(
+            ok=True,
+            chip_type=chip_type,
+            environment=chip_to_environment(chip_type),
+            error_message=None,
+        )
+
+    # Only escalate to the fallback chain if the primary attempt was
+    # cut off by `timeout` — that's the signature of a struggling reset
+    # circuit. A primary that returned "no chip-id produced" means the
+    # port is dead or the device isn't an ESP, so additional strategies
+    # are a waste.
+    if primary_err and "timed out" not in primary_err:
         return ChipDetectionResult(
             ok=False,
             chip_type=None,
             environment=None,
-            error_message=f"Failed to detect chip: {e}",
+            error_message=primary_err,
         )
+
+    attempts: list[str] = [primary_err or f"esptool --before {primary_mode}: timed out"]
+    for mode in ("usb-reset", "no-reset"):
+        chip_type, err = _probe_chip_with_reset_mode(port, mode, timeout)
+        if chip_type:
+            return ChipDetectionResult(
+                ok=True,
+                chip_type=chip_type,
+                environment=chip_to_environment(chip_type),
+                error_message=None,
+            )
+        attempts.append(err or f"esptool --before {mode}: unknown failure")
+
+    return ChipDetectionResult(
+        ok=False,
+        chip_type=None,
+        environment=None,
+        error_message=(
+            "esptool reset-strategy fallback chain exhausted: " + "; ".join(attempts)
+        ),
+    )
 
 
 def chip_to_environment(chip_type: str) -> str | None:

@@ -85,6 +85,31 @@
 #include "fl/chipsets/timing_traits.h"
 #endif
 
+// FastLED #3468: channels-API SCT+DMA clockless AutoResearch harness.
+// Opt-in via `-DFASTLED_LPC_PWM_DMA=1`; the header self-gates on
+// `FL_IS_ARM_LPC_845 && FASTLED_LPC_PWM_DMA` so unrelated builds are
+// unaffected. Note: exclusive with FASTLED_AUTORESEARCH_LPC_WS2812 —
+// both target the same SCT peripheral and would collide at runtime.
+// The host-side `bash autoresearch --pwm-dma-cl` wrapper enforces
+// mutual exclusion with `--dma-spi` and the legacy `ws2812SctTest`.
+#if defined(FL_IS_ARM_LPC_845) && defined(FASTLED_LPC_PWM_DMA)
+#include "AutoResearchPwmDmaClockless.h"
+#endif
+
+// FastLED #3456: LPC845 SPI+DMA async AutoResearch harness (Phase 1 of
+// #3453 bench bring-up). Opt-in via `-DFASTLED_LPC_SPI_DMA=1`; the
+// header self-gates on `FL_IS_ARM_LPC_845 && FASTLED_LPC_SPI_DMA`.
+// Mutually exclusive with FASTLED_LPC_PWM_DMA — both share DMA0
+// channels and the LowMemory flash budget doesn't fit both. Enforced
+// host-side by `bash autoresearch` refusing `--dma-spi --pwm-dma-cl`.
+#if defined(FL_IS_ARM_LPC_845) && defined(FASTLED_LPC_SPI_DMA) && \
+    defined(FASTLED_LPC_PWM_DMA)
+#error "FASTLED_LPC_SPI_DMA and FASTLED_LPC_PWM_DMA are mutually exclusive: both claim DMA0 channels and the LowMemory flash budget doesn't fit both. Pick one for the AutoResearch build."
+#endif
+#if defined(FL_IS_ARM_LPC_845) && defined(FASTLED_LPC_SPI_DMA)
+#include "AutoResearchSpiDma.h"
+#endif
+
 namespace {
 fl::Remote* g_low_memory_remote = nullptr;
 
@@ -347,6 +372,22 @@ inline void autoResearchLowMemorySetup() {
             return s.str();
         });
 #endif  // FASTLED_AUTORESEARCH_LPC_WS2812
+
+    // FastLED #3468: channels-API SCT+DMA clockless AutoResearch
+    // harness. Binds pwmDmaClFrameOnce / pwmDmaClFrameBurst /
+    // pwmDmaClCaptureSelf. Header self-gates on
+    // FL_IS_ARM_LPC_845 && FASTLED_LPC_PWM_DMA.
+#if defined(FL_IS_ARM_LPC_845) && defined(FASTLED_LPC_PWM_DMA)
+    autoresearch::pwm_dma_cl::bind(remote);
+#endif
+
+    // FastLED #3456: SPI+DMA async AutoResearch harness. Binds
+    // dmaSpiTransferOnce / dmaSpiTransferOverlap / dmaSpiMeasureSck.
+    // Header self-gates on FL_IS_ARM_LPC_845 && FASTLED_LPC_SPI_DMA.
+#if defined(FL_IS_ARM_LPC_845) && defined(FASTLED_LPC_SPI_DMA)
+    autoresearch::dma_spi::bind(remote);
+#endif
+
 #endif  // FL_IS_ARM_LPC && !FASTLED_AUTORESEARCH_IEEE754_MODE
 }
 
