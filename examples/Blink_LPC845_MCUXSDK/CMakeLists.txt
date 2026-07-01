@@ -51,6 +51,8 @@ set(FASTLED_SOURCES
 
 # add -DFASTLED_M0_RAMFUNC
 mcux_add_macro(CX FASTLED_M0_RAMFUNC)
+mcux_add_macro(CX FASTLED_LPC_PWM_DMA)
+# mcux_add_macro(CX FASTLED_LPC_PWM_DMA_DEBUG_RAM_DST)
 
 
 mcux_add_source(

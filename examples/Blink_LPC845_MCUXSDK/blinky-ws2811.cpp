@@ -29,7 +29,7 @@ namespace
     constexpr unsigned LED_PIN = 16;
     constexpr unsigned BLINK_MS = 250; // 2 Hz toggle
     // How many leds in your strip?
-    constexpr unsigned NUM_LEDS = 1;
+    constexpr unsigned NUM_LEDS = 4;
     // For led chips like WS2812, which have a data line, ground, and power, you just
     // need to define PIN_DATA.  For led chipsets that are SPI based (four wires - data, clock,
     // ground, and power), like the LPD8806 define both PIN_DATA and CLOCK_PIN
